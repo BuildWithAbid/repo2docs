@@ -68,6 +68,7 @@ test("analyzeRepositoryPath extracts Python API symbols and endpoints", async ()
   assert.ok(analysis.endpoints.some((endpoint) => endpoint.method === "GET" && endpoint.routePath === "/health"));
   assert.ok(analysis.endpoints.some((endpoint) => endpoint.method === "POST" && endpoint.routePath === "/metrics"));
   assert.ok(analysis.projectInsights.frameworks.some((framework) => framework.name === "FastAPI"));
+  assert.ok(analysis.projectInsights.notablePatterns.includes("Repository contains an HTTP service surface."));
 });
 
 test("analyzeRepositoryPath follows TypeScript re-exports", async () => {
@@ -84,6 +85,11 @@ test("analyzeRepositoryPath follows TypeScript re-exports", async () => {
 
   assert.ok(analysis.symbols.some((symbol) => symbol.modulePath === "src/index.ts" && symbol.name === "createProfile"));
   assert.ok(analysis.symbols.some((symbol) => symbol.modulePath === "src/index.ts" && symbol.name === "UserProfile"));
+  assert.ok(
+    analysis.symbols.some(
+      (symbol) => symbol.modulePath === "src/index.ts" && symbol.name === "$createProfile" && symbol.signature.includes("$createProfile")
+    )
+  );
 });
 
 test("analyzeRepositoryPath extracts Go symbols and HTTP routes", async () => {
@@ -101,4 +107,21 @@ test("analyzeRepositoryPath extracts Go symbols and HTTP routes", async () => {
   assert.ok(analysis.symbols.some((symbol) => symbol.name === "StartServer"));
   assert.ok(analysis.symbols.some((symbol) => symbol.name === "HealthService"));
   assert.ok(analysis.endpoints.some((endpoint) => endpoint.routePath === "/health"));
+});
+
+test("analyzeRepositoryPath composes mounted router prefixes into effective endpoints", async () => {
+  const fixturePath = getFixturePath("mounted-router-app");
+  const analysis = await analyzeRepositoryPath(fixturePath, {
+    kind: "local",
+    rawUrl: fixturePath,
+    owner: "local",
+    repo: "mounted-router-app",
+    cloneUrl: fixturePath,
+    cachePath: fixturePath,
+    defaultBranch: "local"
+  });
+
+  assert.ok(analysis.endpoints.some((endpoint) => endpoint.method === "GET" && endpoint.routePath === "/api/users"));
+  assert.ok(analysis.endpoints.some((endpoint) => endpoint.method === "POST" && endpoint.routePath === "/api/users"));
+  assert.ok(!analysis.endpoints.some((endpoint) => endpoint.routePath === "/users"));
 });

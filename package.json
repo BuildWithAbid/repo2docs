@@ -1,6 +1,6 @@
 {
   "name": "repo2docs",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Generate grounded README, architecture, and API documentation from a GitHub repository or local path.",
   "main": "dist/src/index.js",
   "author": "buildwithabid",

@@ -27,10 +27,30 @@ interface WildcardReExport {
 
 type ReExportSpec = NamedReExport | WildcardReExport;
 
+interface ImportBinding {
+  sourcePath: string;
+  importedName?: string;
+}
+
+interface MountPoint {
+  ownerFile: string;
+  ownerReceiverName?: string;
+  prefix: string;
+  targetFile: string;
+  targetReceiverName?: string;
+}
+
+interface ExtractedEndpoint extends EndpointInfo {
+  scopeFile: string;
+  receiverName?: string;
+}
+
 interface FileExtractionResult {
   symbols: SymbolInfo[];
-  endpoints: EndpointInfo[];
+  endpoints: ExtractedEndpoint[];
   localImports: Set<string>;
+  importBindings: Map<string, ImportBinding>;
+  mountPoints: MountPoint[];
   reExports: ReExportSpec[];
 }
 
@@ -171,6 +191,33 @@ function resolveLocalImport(fromFile: string, specifier: string, fileSet: Set<st
   ]);
 
   return [...candidates, ...indexCandidates].find((candidate) => fileSet.has(candidate));
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function joinRoutePaths(prefix: string, routePath: string): string {
+  const normalizedPrefix = prefix === "/" ? "" : prefix.replace(/\/+$/, "");
+  const normalizedRoute = routePath === "/" ? "" : routePath.replace(/^\/+/, "");
+  const joined = [normalizedPrefix, normalizedRoute].filter(Boolean).join("/");
+  return joined.startsWith("/") ? joined : `/${joined || ""}`.replace(/\/+$/, "") || "/";
+}
+
+function getExpressionBindingName(expression: ts.Expression | undefined): string | undefined {
+  if (!expression) {
+    return undefined;
+  }
+
+  if (ts.isIdentifier(expression)) {
+    return expression.text;
+  }
+
+  if (ts.isPropertyAccessExpression(expression)) {
+    return expression.name.text;
+  }
+
+  return undefined;
 }
 
 function literalToRoutePath(expression: ts.Expression | undefined): string | undefined {
@@ -337,7 +384,7 @@ function createSymbolInfo(record: DeclarationRecord, sourceFile: ts.SourceFile):
 }
 
 function cloneReExportedSymbol(symbol: SymbolInfo, modulePath: string, exportedName: string, fromPath: string): SymbolInfo {
-  const signature = symbol.signature.replace(new RegExp(`\\b${symbol.name}\\b`), exportedName);
+  const signature = symbol.signature.replace(new RegExp(escapeRegex(symbol.name)), exportedName);
   return {
     ...symbol,
     name: exportedName,
@@ -457,11 +504,11 @@ function collectExplicitExports(
   };
 }
 
-function pushEndpoint(collection: EndpointInfo[], endpoint: EndpointInfo): void {
+function pushEndpoint(collection: ExtractedEndpoint[], endpoint: ExtractedEndpoint): void {
   collection.push(endpoint);
 }
 
-function detectDecoratorRoutes(sourceFile: ts.SourceFile, filePath: string, collection: EndpointInfo[]): void {
+function detectDecoratorRoutes(sourceFile: ts.SourceFile, filePath: string, collection: ExtractedEndpoint[]): void {
   const visit = (node: ts.Node): void => {
     if (ts.isMethodDeclaration(node) && node.name) {
       const decorators = ts.canHaveDecorators(node) ? ts.getDecorators(node) ?? [] : [];
@@ -479,6 +526,7 @@ function detectDecoratorRoutes(sourceFile: ts.SourceFile, filePath: string, coll
           method: decoratorName.toUpperCase(),
           routePath: literalToRoutePath(decorator.expression.arguments[0]) ?? "/",
           filePath,
+          scopeFile: filePath,
           handlerName: node.name.getText()
         });
       }
@@ -495,13 +543,33 @@ function extractScriptFile(file: FileEntry, fileSet: Set<string>, sourceText: st
   const declarations = collectTopLevelDeclarations(sourceFile);
   const exportResult = collectExplicitExports(sourceFile, declarations, fileSet);
   const localImports = new Set<string>();
-  const endpoints: EndpointInfo[] = [];
+  const importBindings = new Map<string, ImportBinding>();
+  const mountPoints: MountPoint[] = [];
+  const endpoints: ExtractedEndpoint[] = [];
 
   const visit = (node: ts.Node): void => {
     if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
       const resolved = resolveLocalImport(file.relativePath, node.moduleSpecifier.text, fileSet);
       if (resolved) {
         localImports.add(resolved);
+        const bindings = node.importClause?.namedBindings;
+
+        if (node.importClause?.name) {
+          importBindings.set(node.importClause.name.text, { sourcePath: resolved, importedName: "default" });
+        }
+
+        if (bindings && ts.isNamespaceImport(bindings)) {
+          importBindings.set(bindings.name.text, { sourcePath: resolved, importedName: "*" });
+        }
+
+        if (bindings && ts.isNamedImports(bindings)) {
+          for (const element of bindings.elements) {
+            importBindings.set(element.name.text, {
+              sourcePath: resolved,
+              importedName: element.propertyName?.text ?? element.name.text
+            });
+          }
+        }
       }
     }
 
@@ -519,17 +587,48 @@ function extractScriptFile(file: FileEntry, fileSet: Set<string>, sourceText: st
     }
 
     if (
+      ts.isVariableDeclaration(node) &&
+      node.initializer &&
+      ts.isCallExpression(node.initializer) &&
+      ts.isIdentifier(node.initializer.expression) &&
+      node.initializer.expression.text === "require" &&
+      node.initializer.arguments.length > 0 &&
+      ts.isStringLiteral(node.initializer.arguments[0])
+    ) {
+      const resolved = resolveLocalImport(file.relativePath, node.initializer.arguments[0].text, fileSet);
+      if (resolved) {
+        if (ts.isIdentifier(node.name)) {
+          importBindings.set(node.name.text, { sourcePath: resolved, importedName: "default" });
+        } else if (ts.isObjectBindingPattern(node.name)) {
+          for (const element of node.name.elements) {
+            if (!ts.isIdentifier(element.name)) {
+              continue;
+            }
+
+            importBindings.set(element.name.text, {
+              sourcePath: resolved,
+              importedName: element.propertyName && ts.isIdentifier(element.propertyName) ? element.propertyName.text : element.name.text
+            });
+          }
+        }
+      }
+    }
+
+    if (
       ts.isCallExpression(node) &&
       ts.isPropertyAccessExpression(node.expression) &&
       HTTP_METHODS.has(node.expression.name.text.toLowerCase())
     ) {
       const method = node.expression.name.text.toUpperCase();
       const directPath = literalToRoutePath(node.arguments[0]);
+      const receiverName = getExpressionBindingName(node.expression.expression);
       if (directPath) {
         pushEndpoint(endpoints, {
           method,
           routePath: directPath,
           filePath: file.relativePath,
+          scopeFile: file.relativePath,
+          receiverName,
           handlerName: getHandlerName(node.arguments[1])
         });
       } else if (
@@ -538,13 +637,54 @@ function extractScriptFile(file: FileEntry, fileSet: Set<string>, sourceText: st
         node.expression.expression.expression.name.text === "route"
       ) {
         const routePath = literalToRoutePath(node.expression.expression.arguments[0]);
+        const routeReceiverName = getExpressionBindingName(node.expression.expression.expression.expression);
         if (routePath) {
           pushEndpoint(endpoints, {
             method,
             routePath,
             filePath: file.relativePath,
+            scopeFile: file.relativePath,
+            receiverName: routeReceiverName,
             handlerName: getHandlerName(node.arguments[0])
           });
+        }
+      }
+    }
+
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.name.text === "use"
+    ) {
+      const prefix = literalToRoutePath(node.arguments[0]);
+      const ownerReceiverName = getExpressionBindingName(node.expression.expression);
+      const target = node.arguments[1];
+
+      if (prefix && target) {
+        if (ts.isIdentifier(target)) {
+          const binding = importBindings.get(target.text);
+          mountPoints.push({
+            ownerFile: file.relativePath,
+            ownerReceiverName,
+            prefix,
+            targetFile: binding?.sourcePath ?? file.relativePath,
+            targetReceiverName: binding?.importedName && binding.importedName !== "*" && binding.importedName !== "default"
+              ? binding.importedName
+              : binding
+                ? undefined
+                : target.text
+          });
+        } else if (ts.isPropertyAccessExpression(target) && ts.isIdentifier(target.expression)) {
+          const binding = importBindings.get(target.expression.text);
+          if (binding) {
+            mountPoints.push({
+              ownerFile: file.relativePath,
+              ownerReceiverName,
+              prefix,
+              targetFile: binding.sourcePath,
+              targetReceiverName: target.name.text
+            });
+          }
         }
       }
     }
@@ -559,13 +699,15 @@ function extractScriptFile(file: FileEntry, fileSet: Set<string>, sourceText: st
     symbols: exportResult.symbols.map((symbol) => ({ ...symbol, modulePath: file.relativePath })),
     endpoints,
     localImports,
+    importBindings,
+    mountPoints,
     reExports: exportResult.reExports
   };
 }
 
 function extractPythonFile(file: FileEntry, sourceText: string): FileExtractionResult {
   const symbols: SymbolInfo[] = [];
-  const endpoints: EndpointInfo[] = [];
+  const endpoints: ExtractedEndpoint[] = [];
   const explicitExports = new Set<string>();
   const allMatch = sourceText.match(/__all__\s*=\s*\[([\s\S]*?)\]/m);
   if (allMatch) {
@@ -613,7 +755,8 @@ function extractPythonFile(file: FileEntry, sourceText: string): FileExtractionR
     pushEndpoint(endpoints, {
       method: match[1].toUpperCase(),
       routePath: match[2],
-      filePath: file.relativePath
+      filePath: file.relativePath,
+      scopeFile: file.relativePath
     });
   }
 
@@ -624,7 +767,8 @@ function extractPythonFile(file: FileEntry, sourceText: string): FileExtractionR
       pushEndpoint(endpoints, {
         method,
         routePath,
-        filePath: file.relativePath
+        filePath: file.relativePath,
+        scopeFile: file.relativePath
       });
     }
   }
@@ -633,13 +777,15 @@ function extractPythonFile(file: FileEntry, sourceText: string): FileExtractionR
     symbols,
     endpoints,
     localImports: new Set<string>(),
+    importBindings: new Map<string, ImportBinding>(),
+    mountPoints: [],
     reExports: []
   };
 }
 
 function extractGoFile(file: FileEntry, sourceText: string): FileExtractionResult {
   const symbols: SymbolInfo[] = [];
-  const endpoints: EndpointInfo[] = [];
+  const endpoints: ExtractedEndpoint[] = [];
 
   for (const match of sourceText.matchAll(/^func\s+([A-Z][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*([^{\n]+)?\{/gm)) {
     const name = match[1];
@@ -670,7 +816,8 @@ function extractGoFile(file: FileEntry, sourceText: string): FileExtractionResul
     pushEndpoint(endpoints, {
       method: match[1],
       routePath: match[2],
-      filePath: file.relativePath
+      filePath: file.relativePath,
+      scopeFile: file.relativePath
     });
   }
 
@@ -683,6 +830,7 @@ function extractGoFile(file: FileEntry, sourceText: string): FileExtractionResul
         method,
         routePath: match[1],
         filePath: file.relativePath,
+        scopeFile: file.relativePath,
         handlerName: match[2]
       });
     }
@@ -692,13 +840,15 @@ function extractGoFile(file: FileEntry, sourceText: string): FileExtractionResul
     symbols,
     endpoints,
     localImports: new Set<string>(),
+    importBindings: new Map<string, ImportBinding>(),
+    mountPoints: [],
     reExports: []
   };
 }
 
 function extractRustFile(file: FileEntry, sourceText: string): FileExtractionResult {
   const symbols: SymbolInfo[] = [];
-  const endpoints: EndpointInfo[] = [];
+  const endpoints: ExtractedEndpoint[] = [];
 
   for (const match of sourceText.matchAll(/^pub\s+fn\s+([a-zA-Z_][A-Za-z0-9_]*)\s*\(([^)]*)\)/gm)) {
     const name = match[1];
@@ -730,7 +880,8 @@ function extractRustFile(file: FileEntry, sourceText: string): FileExtractionRes
     pushEndpoint(endpoints, {
       method: match[1].toUpperCase(),
       routePath: match[2],
-      filePath: file.relativePath
+      filePath: file.relativePath,
+      scopeFile: file.relativePath
     });
   }
 
@@ -738,6 +889,8 @@ function extractRustFile(file: FileEntry, sourceText: string): FileExtractionRes
     symbols,
     endpoints,
     localImports: new Set<string>(),
+    importBindings: new Map<string, ImportBinding>(),
+    mountPoints: [],
     reExports: []
   };
 }
@@ -760,6 +913,8 @@ function extractForFile(file: FileEntry, sourceText: string, fileSet: Set<string
     symbols: [],
     endpoints: [],
     localImports: new Set<string>(),
+    importBindings: new Map<string, ImportBinding>(),
+    mountPoints: [],
     reExports: []
   };
 }
@@ -768,6 +923,18 @@ function dedupeSymbols(symbols: SymbolInfo[]): SymbolInfo[] {
   const seen = new Set<string>();
   return symbols.filter((symbol) => {
     const key = `${symbol.modulePath}:${symbol.kind}:${symbol.name}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+function dedupeExtractedEndpoints(endpoints: ExtractedEndpoint[]): ExtractedEndpoint[] {
+  const seen = new Set<string>();
+  return endpoints.filter((endpoint) => {
+    const key = `${endpoint.scopeFile}:${endpoint.filePath}:${endpoint.method}:${endpoint.routePath}:${endpoint.handlerName ?? ""}`;
     if (seen.has(key)) {
       return false;
     }
@@ -788,6 +955,95 @@ function dedupeEndpoints(endpoints: EndpointInfo[]): EndpointInfo[] {
   });
 }
 
+function resolveMountedTargets(targetEndpoints: ExtractedEndpoint[], mountPoint: MountPoint): ExtractedEndpoint[] {
+  if (mountPoint.targetReceiverName) {
+    const targeted = targetEndpoints.filter((endpoint) => endpoint.receiverName === mountPoint.targetReceiverName);
+    if (targeted.length > 0) {
+      return targeted;
+    }
+  }
+
+  const receiverBound = targetEndpoints.filter((endpoint) => endpoint.receiverName && endpoint.receiverName !== "app");
+  if (receiverBound.length > 0) {
+    return receiverBound;
+  }
+
+  return targetEndpoints;
+}
+
+function buildExtractedEndpointKey(endpoint: ExtractedEndpoint): string {
+  return `${endpoint.scopeFile}:${endpoint.filePath}:${endpoint.method}:${endpoint.routePath}:${endpoint.handlerName ?? ""}`;
+}
+
+function composeMountedEndpoints(
+  endpointMap: Map<string, ExtractedEndpoint[]>,
+  mountPoints: MountPoint[]
+): ExtractedEndpoint[] {
+  const suppressed = new Set<string>();
+
+  for (let iteration = 0; iteration < 10; iteration += 1) {
+    let changed = false;
+
+    for (const mountPoint of mountPoints) {
+      const targetEndpoints = endpointMap.get(mountPoint.targetFile) ?? [];
+      if (targetEndpoints.length === 0) {
+        continue;
+      }
+
+      const matchingTargets = resolveMountedTargets(targetEndpoints, mountPoint);
+      if (matchingTargets.length === 0) {
+        continue;
+      }
+
+      for (const endpoint of matchingTargets) {
+        suppressed.add(buildExtractedEndpointKey(endpoint));
+      }
+
+      const ownerEndpoints = endpointMap.get(mountPoint.ownerFile) ?? [];
+      const additions = matchingTargets.map((endpoint) => ({
+        ...endpoint,
+        scopeFile: mountPoint.ownerFile,
+        routePath: joinRoutePaths(mountPoint.prefix, endpoint.routePath),
+        receiverName: mountPoint.ownerReceiverName ?? endpoint.receiverName
+      }));
+      const merged = dedupeExtractedEndpoints([...ownerEndpoints, ...additions]);
+
+      if (merged.length !== ownerEndpoints.length) {
+        endpointMap.set(mountPoint.ownerFile, merged);
+        changed = true;
+      }
+    }
+
+    if (!changed) {
+      break;
+    }
+  }
+
+  return [...endpointMap.values()]
+    .flat()
+    .filter((endpoint) => !suppressed.has(buildExtractedEndpointKey(endpoint)));
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let currentIndex = 0;
+
+  const consume = async (): Promise<void> => {
+    while (currentIndex < items.length) {
+      const itemIndex = currentIndex;
+      currentIndex += 1;
+      results[itemIndex] = await worker(items[itemIndex]);
+    }
+  };
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => consume()));
+  return results;
+}
+
 export async function extractSymbolInsights(snapshot: RepositorySnapshot): Promise<SymbolExtractionResult> {
   const candidateFiles = snapshot.sourceFiles;
   const fileSet = new Set(candidateFiles.filter((file) => SCRIPT_EXTENSIONS.has(file.extension)).map((file) => file.relativePath));
@@ -795,19 +1051,37 @@ export async function extractSymbolInsights(snapshot: RepositorySnapshot): Promi
   const fileExportCounts = new Map<string, number>();
   const symbolMap = new Map<string, SymbolInfo[]>();
   const reExportMap = new Map<string, ReExportSpec[]>();
-  const endpoints: EndpointInfo[] = [];
+  const endpointMap = new Map<string, ExtractedEndpoint[]>();
+  const mountPoints: MountPoint[] = [];
 
-  for (const file of candidateFiles) {
+  const extractionResults = await mapWithConcurrency(candidateFiles, 16, async (file) => {
     if (file.size > 1024 * 1024) {
-      continue;
+      return {
+        file,
+        extraction: {
+          symbols: [],
+          endpoints: [],
+          localImports: new Set<string>(),
+          importBindings: new Map<string, ImportBinding>(),
+          mountPoints: [],
+          reExports: []
+        } satisfies FileExtractionResult
+      };
     }
 
     const sourceText = await fs.readFile(file.absolutePath, "utf8");
-    const extraction = extractForFile(file, sourceText, fileSet);
+    return {
+      file,
+      extraction: extractForFile(file, sourceText, fileSet)
+    };
+  });
+
+  for (const { file, extraction } of extractionResults) {
     localImportGraph.set(file.relativePath, extraction.localImports);
     symbolMap.set(file.relativePath, extraction.symbols);
     reExportMap.set(file.relativePath, extraction.reExports);
-    endpoints.push(...extraction.endpoints);
+    endpointMap.set(file.relativePath, extraction.endpoints);
+    mountPoints.push(...extraction.mountPoints);
   }
 
   for (let iteration = 0; iteration < 10; iteration += 1) {
@@ -861,6 +1135,8 @@ export async function extractSymbolInsights(snapshot: RepositorySnapshot): Promi
   for (const [filePath, entries] of symbolMap.entries()) {
     fileExportCounts.set(filePath, entries.length);
   }
+
+  const endpoints = composeMountedEndpoints(endpointMap, mountPoints).map(({ scopeFile: _scopeFile, receiverName: _receiverName, ...endpoint }) => endpoint);
 
   return {
     symbols,

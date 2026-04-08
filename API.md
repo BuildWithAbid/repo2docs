@@ -84,7 +84,7 @@ Detects:
 
 ### `extractSymbolInsights(snapshot)`
 
-Extracts exported symbols, HTTP endpoints, import relationships, and export counts from TypeScript, JavaScript, Python, Go, and Rust source files.
+Extracts exported symbols, HTTP endpoints, import relationships, and export counts from TypeScript, JavaScript, Python, Go, and Rust source files, including mounted router prefix composition for effective HTTP paths.
 
 ### `detectEntrypoints(snapshot, packageManifest, endpoints)`
 

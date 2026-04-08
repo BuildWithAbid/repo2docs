@@ -1,21 +1,6 @@
 import type { AnalysisResult, DependencyInfo, ScriptInfo } from "../core/types";
+import { appendSection, describeApplicationStack } from "./markdown";
 import { formatList, renderCodeBlock } from "../utils/text";
-
-function appendSection(sections: string[], title: string, body: string[]): void {
-  if (body.length === 0) {
-    return;
-  }
-
-  sections.push("", `## ${title}`, "", ...body);
-}
-
-function describeApplicationStack(analysis: AnalysisResult): string {
-  const frameworkNames = analysis.projectInsights.frameworks
-    .filter((framework) => framework.category === "frontend" || framework.category === "backend" || framework.category === "fullstack" || framework.category === "runtime")
-    .map((framework) => framework.name);
-
-  return frameworkNames.length > 0 ? frameworkNames.join(", ") : "None confidently detected";
-}
 
 function renderTree(analysis: AnalysisResult): string {
   const treeLines = analysis.snapshot.treeLines.slice(0, 80);
@@ -117,6 +102,7 @@ export function generateReadme(analysis: AnalysisResult): string {
     "",
     packageManifest?.description ?? analysis.overview
   ];
+  const gettingStarted = buildGettingStarted(analysis);
 
   appendSection(sections, "Overview", [
     analysis.overview,
@@ -128,7 +114,7 @@ export function generateReadme(analysis: AnalysisResult): string {
   appendSection(
     sections,
     "Getting Started",
-    formatList(buildGettingStarted(analysis).length > 0 ? buildGettingStarted(analysis) : ["Inspect the detected entrypoints and scripts before running the project."]).split("\n")
+    formatList(gettingStarted.length > 0 ? gettingStarted : ["Inspect the detected entrypoints and scripts before running the project."]).split("\n")
   );
 
   if (analysis.projectInsights.scripts.length > 0) {

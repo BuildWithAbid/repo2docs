@@ -1,21 +1,6 @@
 import type { AnalysisResult } from "../core/types";
+import { appendSection, describeApplicationStack } from "./markdown";
 import { formatList, renderCodeBlock } from "../utils/text";
-
-function appendSection(sections: string[], title: string, body: string[]): void {
-  if (body.length === 0) {
-    return;
-  }
-
-  sections.push("", `## ${title}`, "", ...body);
-}
-
-function describeApplicationStack(analysis: AnalysisResult): string {
-  const frameworkNames = analysis.projectInsights.frameworks
-    .filter((framework) => framework.category === "frontend" || framework.category === "backend" || framework.category === "fullstack" || framework.category === "runtime")
-    .map((framework) => framework.name);
-
-  return frameworkNames.length > 0 ? frameworkNames.join(", ") : "None confidently detected";
-}
 
 function renderModuleLines(analysis: AnalysisResult): string[] {
   return analysis.modules.slice(0, 10).map((moduleInfo) => {

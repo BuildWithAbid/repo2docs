@@ -6,7 +6,7 @@
 - `ARCHITECTURE.md`
 - `API.md`
 
-Version 2 focuses on output quality, code-aware heuristics, local-path support, and safer default behavior.
+Version 2.1 focuses on output quality, code-aware heuristics, local-path support, and safer default behavior.
 
 ## What v2 Improves
 
@@ -16,6 +16,8 @@ Version 2 focuses on output quality, code-aware heuristics, local-path support, 
 - Detects package managers, build tools, test setup, linting, CI signals, environment files, and notable repository patterns.
 - Improves CLI help text, terminal output, and error messages.
 - Expands automated tests around analysis, repository syncing, and input resolution.
+- Composes mounted router prefixes into effective HTTP endpoints such as `/api/users`, not just raw router-local paths.
+- Reuses shared markdown helpers so the generated documents stay structurally consistent.
 
 ## Install
 
@@ -90,6 +92,7 @@ repo2docs-output/my-service/API.md
 - exported classes
 - exported interfaces and types
 - HTTP endpoints across common JS, Python, Go, and Rust server patterns
+- mounted router prefixes for effective route reporting
 - re-exported public module surfaces
 - local import relationships used for module summaries
 

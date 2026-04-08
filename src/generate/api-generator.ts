@@ -1,12 +1,5 @@
 import type { AnalysisResult, SymbolInfo } from "../core/types";
-
-function appendSection(sections: string[], title: string, body: string[]): void {
-  if (body.length === 0) {
-    return;
-  }
-
-  sections.push("", `## ${title}`, "", ...body);
-}
+import { appendSection } from "./markdown";
 
 function groupSymbolsByModule(symbols: SymbolInfo[]): Map<string, SymbolInfo[]> {
   const grouped = new Map<string, SymbolInfo[]>();

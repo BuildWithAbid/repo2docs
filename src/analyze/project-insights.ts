@@ -219,11 +219,25 @@ function deriveTooling(frameworks: FrameworkInfo[], configFiles: ConfigFileInfo[
 function detectPatterns(
   snapshot: RepositorySnapshot,
   entrypoints: EntrypointInfo[],
-  dependencies: DependencyInfo[],
+  frameworks: FrameworkInfo[],
   environmentFiles: string[]
 ): string[] {
   const patterns: string[] = [];
-  const dependencyNames = new Set(dependencies.map((dependency) => dependency.name.toLowerCase()));
+  const frameworkNames = new Set(frameworks.map((framework) => framework.name));
+  const httpServiceFrameworks = new Set([
+    "Actix Web",
+    "Axum",
+    "Django",
+    "Express",
+    "FastAPI",
+    "Fastify",
+    "Flask",
+    "Gin",
+    "Gorilla Mux",
+    "Hono",
+    "Koa",
+    "NestJS"
+  ]);
 
   if (snapshot.manifests.packageJson?.workspaces.length || snapshot.entries.some((entry) => entry.relativePath.startsWith("packages/"))) {
     patterns.push("Repository appears to use a workspace or monorepo layout.");
@@ -231,7 +245,7 @@ function detectPatterns(
   if (entrypoints.some((entrypoint) => entrypoint.kind === "cli-bin")) {
     patterns.push("Repository exposes a command-line entry point.");
   }
-  if (dependencyNames.has("express") || dependencyNames.has("fastify") || dependencyNames.has("koa") || dependencyNames.has("hono")) {
+  if ([...frameworkNames].some((frameworkName) => httpServiceFrameworks.has(frameworkName))) {
     patterns.push("Repository contains an HTTP service surface.");
   }
   if (environmentFiles.length > 0) {
@@ -287,7 +301,7 @@ export function buildProjectInsights(
     scripts,
     configFiles,
     environmentFiles,
-    notablePatterns: detectPatterns(snapshot, entrypoints, dependencies, environmentFiles),
+    notablePatterns: detectPatterns(snapshot, entrypoints, frameworks, environmentFiles),
     importantFiles: detectImportantFiles(snapshot, entrypoints, configFiles)
   };
 }

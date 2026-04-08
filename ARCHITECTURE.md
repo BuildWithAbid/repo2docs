@@ -77,6 +77,7 @@ Uses the TypeScript compiler API plus lightweight language heuristics to extract
 - default exports
 - re-exported public symbols
 - HTTP routes from common JS, Python, Go, and Rust patterns
+- mounted router prefixes so effective paths are documented instead of only internal router paths
 - local import relationships
 
 ### `src/analyze/entrypoint-detector.ts`
@@ -99,7 +100,7 @@ Infers:
 
 ### `src/generate/`
 
-Contains the markdown renderers. These modules are intentionally pure: they consume an `AnalysisResult` and return strings.
+Contains the markdown renderers plus shared markdown helpers. These modules are intentionally pure: they consume an `AnalysisResult` and return strings.
 
 ### `src/output/write-docs.ts`
 
