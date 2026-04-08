@@ -8,6 +8,7 @@ export interface Logger {
 }
 
 export interface RepositorySource {
+  kind: "github" | "local";
   rawUrl: string;
   owner: string;
   repo: string;
@@ -49,6 +50,7 @@ export interface PackageManifestInfo {
   devDependencies: Record<string, string>;
   peerDependencies: Record<string, string>;
   packageManager?: string;
+  engines: Record<string, string>;
   main?: string;
   module?: string;
   types?: string;
@@ -65,6 +67,43 @@ export interface ManifestSet {
   pyprojectDependencies?: string[];
   goDependencies?: string[];
   cargoDependencies?: string[];
+}
+
+export interface ScriptInfo {
+  name: string;
+  command: string;
+  category: "dev" | "build" | "test" | "start" | "lint" | "format" | "release" | "other";
+}
+
+export interface FrameworkInfo {
+  name: string;
+  category: "frontend" | "backend" | "fullstack" | "testing" | "build" | "linting" | "runtime";
+  evidence: string;
+}
+
+export interface ToolingInfo {
+  packageManager?: string;
+  buildTools: string[];
+  testTools: string[];
+  lintTools: string[];
+  ciTools: string[];
+}
+
+export interface ConfigFileInfo {
+  path: string;
+  category: "environment" | "testing" | "build" | "ci" | "container" | "quality" | "deployment" | "workspace";
+  description: string;
+}
+
+export interface ProjectInsights {
+  packageManager?: string;
+  frameworks: FrameworkInfo[];
+  tooling: ToolingInfo;
+  scripts: ScriptInfo[];
+  configFiles: ConfigFileInfo[];
+  environmentFiles: string[];
+  notablePatterns: string[];
+  importantFiles: string[];
 }
 
 export interface RepositorySnapshot {
@@ -117,11 +156,14 @@ export interface EndpointInfo {
 export interface ModuleInfo {
   name: string;
   path: string;
+  role: string;
   fileCount: number;
   exportCount: number;
   importCount: number;
   summary: string;
   relatedPaths: string[];
+  notableFiles: string[];
+  topSymbols: string[];
 }
 
 export interface ArchitectureInfo {
@@ -139,6 +181,7 @@ export interface AnalysisResult {
   modules: ModuleInfo[];
   symbols: SymbolInfo[];
   endpoints: EndpointInfo[];
+  projectInsights: ProjectInsights;
   architecture: ArchitectureInfo;
   overview: string;
   warnings: string[];
@@ -161,4 +204,3 @@ export interface WriteResult {
   outputDir: string;
   files: Record<"README.md" | "ARCHITECTURE.md" | "API.md", string>;
 }
-

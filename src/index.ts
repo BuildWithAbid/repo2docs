@@ -3,12 +3,14 @@ import type { AnalysisResult, GeneratedDocs, Logger, RepositorySource, WriteResu
 import { analyzeArchitecture } from "./analyze/architecture-analyzer";
 import { detectDependencies } from "./analyze/dependency-detector";
 import { detectEntrypoints } from "./analyze/entrypoint-detector";
+import { buildProjectInsights } from "./analyze/project-insights";
 import { scanRepository } from "./analyze/repo-scanner";
 import { extractSymbolInsights } from "./analyze/symbol-extractor";
 import { generateApiDoc } from "./generate/api-generator";
 import { generateArchitectureDoc } from "./generate/architecture-generator";
 import { generateReadme } from "./generate/readme-generator";
 import { prepareRepository } from "./git/repo-manager";
+import { resolveRepositorySource } from "./input/source-resolver";
 import { writeDocs } from "./output/write-docs";
 
 export interface GenerateRepositoryDocsOptions {
@@ -23,6 +25,10 @@ export interface GenerateRepositoryDocsResult {
   writtenFiles: WriteResult;
 }
 
+function resolveDefaultOutputDir(source: RepositorySource, baseDir = process.cwd()): string {
+  return path.join(baseDir, "repo2docs-output", source.repo);
+}
+
 export async function analyzeRepositoryPath(rootPath: string, source: RepositorySource): Promise<AnalysisResult> {
   const snapshot = await scanRepository(rootPath, source.repo);
   const dependencyResult = await detectDependencies(snapshot);
@@ -31,12 +37,14 @@ export async function analyzeRepositoryPath(rootPath: string, source: Repository
 
   const symbolInsights = await extractSymbolInsights(snapshot);
   const entrypoints = detectEntrypoints(snapshot, snapshot.manifests.packageJson, symbolInsights.endpoints);
+  const projectInsights = buildProjectInsights(snapshot, dependencyResult.dependencies, entrypoints);
   const architectureResult = analyzeArchitecture(
     snapshot,
     dependencyResult.dependencies,
     entrypoints,
     symbolInsights.symbols,
     symbolInsights.endpoints,
+    projectInsights,
     symbolInsights.localImportGraph,
     symbolInsights.fileExportCounts
   );
@@ -49,6 +57,7 @@ export async function analyzeRepositoryPath(rootPath: string, source: Repository
     modules: architectureResult.modules,
     symbols: symbolInsights.symbols,
     endpoints: symbolInsights.endpoints,
+    projectInsights,
     architecture: architectureResult.architecture,
     overview: architectureResult.overview,
     warnings: snapshot.warnings
@@ -68,6 +77,7 @@ export async function generateRepositoryDocsFromPath(
   options: GenerateRepositoryDocsOptions & { source?: RepositorySource } = {}
 ): Promise<GenerateRepositoryDocsResult> {
   const source = options.source ?? {
+    kind: "local",
     rawUrl: rootPath,
     owner: "local",
     repo: path.basename(rootPath),
@@ -75,9 +85,13 @@ export async function generateRepositoryDocsFromPath(
     cachePath: rootPath,
     defaultBranch: "local"
   };
+
+  options.logger?.info(`Analyzing local repository at ${rootPath}`);
   const analysis = await analyzeRepositoryPath(rootPath, source);
   const docs = generateDocs(analysis);
-  const writtenFiles = await writeDocs(docs, options.outputDir ?? process.cwd());
+  const resolvedOutputDir = options.outputDir ?? resolveDefaultOutputDir(source);
+  options.logger?.info(`Writing generated docs to ${resolvedOutputDir}`);
+  const writtenFiles = await writeDocs(docs, resolvedOutputDir);
 
   return {
     analysis,
@@ -87,18 +101,28 @@ export async function generateRepositoryDocsFromPath(
 }
 
 export async function generateRepositoryDocs(
-  rawRepoUrl: string,
+  input: string,
   options: GenerateRepositoryDocsOptions = {}
 ): Promise<GenerateRepositoryDocsResult> {
-  const context = await prepareRepository(rawRepoUrl, {
+  const resolved = await resolveRepositorySource(input, options.cacheRoot);
+
+  if (resolved.source.kind === "local") {
+    return generateRepositoryDocsFromPath(resolved.localPath ?? resolved.source.cachePath, {
+      ...options,
+      source: resolved.source
+    });
+  }
+
+  options.logger?.info(`Preparing repository from ${resolved.source.cloneUrl}`);
+  const context = await prepareRepository(input, {
     cacheRoot: options.cacheRoot,
     logger: options.logger
   });
 
+  options.logger?.info(`Analyzing cached repository at ${context.rootPath}`);
   return generateRepositoryDocsFromPath(context.rootPath, {
-    outputDir: options.outputDir,
+    outputDir: options.outputDir ?? resolveDefaultOutputDir(context.source),
     logger: options.logger,
     source: context.source
   });
 }
-

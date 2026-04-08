@@ -2,133 +2,151 @@
 
 ## Overview
 
-`repo2docs` is a modular Node.js CLI that converts repository metadata and static code signals into structured markdown documentation. The design is intentionally simple: each stage has a narrow responsibility, deterministic inputs, and text-based outputs that are easy to test.
+`repo2docs` is a staged documentation pipeline. It resolves an input source, prepares a repository if needed, runs deterministic analysis passes, and renders three markdown outputs into a dedicated directory.
 
-## Architecture Goals
+The codebase stays intentionally small: each stage owns one responsibility and exchanges typed data structures instead of hidden side effects.
 
-- Keep runtime dependencies minimal.
-- Prefer deterministic heuristics over opaque generation.
-- Separate repository access, analysis, and markdown rendering.
-- Keep modules pure where possible so they are easy to unit test.
-- Fail clearly when Git operations, URL validation, or file writes fail.
-
-## End-to-End Flow
+## Runtime Flow
 
 ```text
 CLI
-  -> Repository URL validation
-  -> Git clone or fetch into cache
-  -> Repository scan
-  -> Manifest and dependency detection
-  -> Symbol and endpoint extraction
-  -> Architecture and module inference
-  -> Markdown generation
-  -> Write README.md, ARCHITECTURE.md, API.md
+  -> Parse arguments
+  -> Resolve input source (GitHub URL or local path)
+  -> Clone or refresh repository cache when needed
+  -> Scan repository tree
+  -> Detect manifests, dependencies, scripts, tooling, and config files
+  -> Extract symbols, routes, and import relationships
+  -> Infer architecture and module roles
+  -> Render README.md, ARCHITECTURE.md, API.md
+  -> Write files to repo2docs-output/<repo>/ or a custom --output path
 ```
 
-## Module Breakdown
+## Main Modules
 
 ### `src/cli.ts`
 
-Handles argument validation, process exit behavior, and user-facing progress logging.
+Parses arguments, prints help text, configures logging, and handles process exit behavior.
 
-### `src/index.ts`
+### `src/input/source-resolver.ts`
 
-Acts as the application orchestrator. It connects repository preparation, analysis, document generation, and output writing into a single workflow.
+Determines whether the input is a GitHub URL or a local path and normalizes it into a shared `RepositorySource`.
 
-### `src/git/`
+### `src/git/repo-manager.ts`
 
-Responsible for GitHub URL normalization, repository cache path generation, `git clone`, `git fetch`, branch checkout, and revision tracking.
+Handles GitHub-specific repository preparation:
 
-### `src/analyze/`
+- URL normalization
+- cache path selection
+- `git clone`
+- `git fetch`
+- branch checkout
 
-Contains the codebase intelligence pipeline.
+### `src/analyze/repo-scanner.ts`
 
-- `repo-scanner.ts`
-  builds the file inventory, source file list, manifest list, language distribution, and tree view.
-- `dependency-detector.ts`
-  parses supported manifests and normalizes dependency metadata.
-- `entrypoint-detector.ts`
-  identifies CLI bins, package entry points, and conventional bootstrap files.
-- `symbol-extractor.ts`
-  uses the TypeScript compiler API to extract exported symbols and Express-style HTTP endpoints.
-- `architecture-analyzer.ts`
-  groups files into major modules, infers project type, and produces high-level system summaries.
+Builds the repository snapshot:
+
+- file and directory entries
+- source file list
+- manifest discovery
+- language counts
+- repository tree rendering
+
+### `src/analyze/dependency-detector.ts`
+
+Parses supported manifests and normalizes dependency metadata.
+
+### `src/analyze/project-insights.ts`
+
+Builds higher-level repository facts:
+
+- package manager
+- scripts
+- framework signals
+- build/test/lint tooling
+- config files
+- environment files
+- notable repository patterns
+
+### `src/analyze/symbol-extractor.ts`
+
+Uses the TypeScript compiler API plus lightweight language heuristics to extract:
+
+- exported functions
+- exported classes
+- exported interfaces and types
+- default exports
+- re-exported public symbols
+- HTTP routes from common JS, Python, Go, and Rust patterns
+- local import relationships
+
+### `src/analyze/entrypoint-detector.ts`
+
+Detects entry points from:
+
+- `package.json` fields
+- CLI `bin` declarations
+- conventional bootstrap filenames
+- route-bearing files
+
+### `src/analyze/architecture-analyzer.ts`
+
+Infers:
+
+- project kind
+- module roles
+- module summaries
+- high-level data flow
 
 ### `src/generate/`
 
-Contains pure markdown renderers for each output document.
+Contains the markdown renderers. These modules are intentionally pure: they consume an `AnalysisResult` and return strings.
 
-- `readme-generator.ts`
-- `architecture-generator.ts`
-- `api-generator.ts`
+### `src/output/write-docs.ts`
 
-### `src/output/`
+Writes the final markdown files to the resolved output directory.
 
-Writes the generated markdown documents to the selected output directory.
+## Core Data Model
 
-### `src/core/`
+### `RepositorySource`
 
-Defines shared domain types and operational error classes used across the application.
+Normalized input metadata shared across GitHub and local-path flows.
 
-### `src/utils/`
+### `RepositorySnapshot`
 
-Holds low-level shared helpers for path normalization, text formatting, and logging.
+Low-level repository facts collected during scanning.
 
-## Data Model
+### `ProjectInsights`
 
-The internal pipeline is centered around a few stable structures:
+Higher-level heuristics about frameworks, tooling, scripts, config files, and patterns.
 
-- `RepositorySource`
-  normalized repository metadata and cache location
-- `RepositorySnapshot`
-  scanned files, manifests, directory tree, and language distribution
-- `AnalysisResult`
-  entry points, modules, symbols, dependencies, endpoints, and architecture summary
-- `GeneratedDocs`
-  final markdown output for `README.md`, `ARCHITECTURE.md`, and `API.md`
+### `AnalysisResult`
+
+The main analysis artifact consumed by the markdown generators.
 
 ## Design Decisions
 
-### Deterministic generation
+### Deterministic output
 
-The project does not call external AI services. All summaries are generated from rules and naming heuristics so results stay reproducible and inexpensive.
+The tool does not rely on AI calls. Every sentence is built from code structure, manifests, and naming heuristics so output stays reproducible and inexpensive.
 
-### Narrow module responsibilities
+### Incremental analysis
 
-The implementation keeps each phase separate. This makes it straightforward to improve one part of the analysis pipeline without changing the rest of the system.
+The repository is analyzed in layers: scan first, then manifests and dependencies, then symbols and routes, then architecture. This keeps each pass understandable and testable.
 
-### Conservative extraction
+### Conservative documentation
 
-The symbol extraction logic only documents code it can detect with reasonable confidence. When a public API is unclear, the tool prefers omission over speculative documentation.
+The generators avoid unsupported claims. If the repository does not provide enough evidence, the tool leaves sections out instead of filling them with invented content.
 
-## Error Handling
+### Dedicated output folder
 
-Errors are surfaced through a dedicated `Repo2DocsError` type when they are expected operational failures, such as:
+Version 2 no longer writes into the current working directory by default. The dedicated output folder reduces accidental overwrites and makes repeated runs safer.
 
-- invalid repository URLs
-- unsupported hosts
-- Git command failures
-- write failures
+## Testing
 
-Unexpected exceptions still fail the CLI with a non-zero exit code.
+The project uses Node's built-in test runner with:
 
-## Testing Strategy
+- unit tests for URL and input resolution
+- integration tests for analysis and output generation
+- repository sync tests against temporary local Git repos
 
-The test suite is split into:
-
-- unit tests for isolated helpers and URL normalization
-- integration tests for repository analysis and markdown generation
-- repository sync tests using temporary local Git repositories
-
-The fixture repository under `test/fixtures/basic-node-app` provides a stable target for analysis assertions.
-
-## Extension Points
-
-The current design can be extended cleanly in these areas:
-
-- add more manifest parsers in `dependency-detector.ts`
-- add more language-specific extractors alongside `symbol-extractor.ts`
-- add configurable markdown templates in the generator layer
-- add output profiles or custom destinations in the write layer
-
+The fixture repository under `test/fixtures/basic-node-app` is intentionally rich enough to exercise entry-point detection, route detection, tooling detection, config detection, and output rendering.

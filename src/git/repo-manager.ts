@@ -72,6 +72,7 @@ export function normalizeGithubUrl(rawUrl: string, cacheRoot = getCacheRoot()): 
   const cachePath = path.join(cacheRoot, `${sanitizePathSegment(owner)}--${sanitizePathSegment(repoName)}`);
 
   return {
+    kind: "github",
     rawUrl,
     owner,
     repo: repoName,
@@ -142,4 +143,3 @@ export async function prepareRepository(rawUrl: string, options: PrepareReposito
     currentRevision: syncResult.currentRevision
   };
 }
-

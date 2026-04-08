@@ -1,170 +1,135 @@
-# repo2docs API Reference
+# repo2docs API
 
-## CLI Command
+## CLI
 
-### `repo2docs <github_repo_url>`
+### `repo2docs <github_repo_url_or_local_path> [--output <dir>] [--verbose]`
 
-Runs the full documentation pipeline for a GitHub repository and writes:
+Runs the full documentation pipeline and writes:
 
 - `README.md`
 - `ARCHITECTURE.md`
 - `API.md`
 
-## Public Application Functions
+into the resolved output directory.
 
-### `generateRepositoryDocs(rawRepoUrl, options)`
+## Primary Functions
 
-High-level entry point for the CLI workflow.
+### `generateRepositoryDocs(input, options)`
+
+Main public workflow entry.
 
 Responsibilities:
 
-- prepare the repository cache
-- analyze the cloned repository
-- generate markdown documents
-- write output files to disk
-
-Returns a `GenerateRepositoryDocsResult` object containing analysis data, generated markdown, and output file paths.
+- resolve input source
+- prepare a GitHub repository cache when needed
+- analyze the repository
+- generate markdown
+- write output files
 
 ### `generateRepositoryDocsFromPath(rootPath, options)`
 
-Runs the same documentation pipeline against a local repository path instead of cloning from GitHub.
-
-Use this in tests or local integrations where the repository already exists on disk.
+Runs the analysis and markdown pipeline for an already-local repository path.
 
 ### `analyzeRepositoryPath(rootPath, source)`
 
-Runs repository scanning, dependency detection, symbol extraction, entry-point detection, and architecture inference for a local repository path.
-
-Returns a structured `AnalysisResult`.
+Builds the complete `AnalysisResult` used by the markdown generators.
 
 ### `generateDocs(analysis)`
 
-Converts a completed `AnalysisResult` into a `GeneratedDocs` object with markdown content for all three documents.
-
-## Git Layer
-
-### `normalizeGithubUrl(rawUrl, cacheRoot?)`
-
-Validates a GitHub repository URL and converts it into a normalized `RepositorySource`.
-
-Key outputs:
-
-- repository owner
-- repository name
-- canonical clone URL
-- cache directory path
-
-### `syncRepositoryToCache(options)`
-
-Clones the repository if the cache does not exist, otherwise fetches the remote and updates the cached checkout.
-
-Returns:
-
-- `cachePath`
-- `currentRevision`
-- `defaultBranch`
-
-### `prepareRepository(rawUrl, options?)`
-
-Combines URL normalization and repository synchronization into a single call used by the CLI entrypoint.
-
-## Analysis Layer
-
-### `scanRepository(rootPath, repoName?)`
-
-Walks the repository tree, applies ignore rules, collects manifests, identifies source files, and builds a tree representation used in generated docs.
-
-### `detectDependencies(snapshot)`
-
-Parses supported manifests and normalizes dependency data into a shared structure.
-
-Currently supports:
-
-- `package.json`
-- `tsconfig.json`
-- `requirements.txt`
-- `pyproject.toml`
-- `go.mod`
-- `Cargo.toml`
-
-### `detectEntrypoints(snapshot, packageManifest, endpoints)`
-
-Detects likely project entry points using package metadata, conventional filenames, and discovered HTTP endpoint files.
-
-### `extractSymbolInsights(snapshot)`
-
-Uses the TypeScript compiler API to extract:
-
-- exported functions
-- exported classes
-- exported interfaces and types
-- Express-style route registrations
-- local import graph relationships
-
-### `analyzeArchitecture(snapshot, dependencies, entrypoints, symbols, endpoints, localImportGraph, fileExportCounts)`
-
-Infers project kind, groups files into modules, summarizes system flow, and produces architecture notes.
-
-## Document Generation Layer
-
-### `generateReadme(analysis)`
-
-Builds a repository overview document intended for onboarding and repository landing pages.
-
-### `generateArchitectureDoc(analysis)`
-
-Builds a technical system overview focused on structure, modules, entry points, and dependency signals.
-
-### `generateApiDoc(analysis)`
-
-Builds a public API overview by grouping exported symbols and HTTP endpoints by module.
-
-## Output Layer
-
-### `writeDocs(docs, outputDir)`
-
-Creates the output directory when needed and writes:
+Returns the markdown content for:
 
 - `README.md`
 - `ARCHITECTURE.md`
 - `API.md`
 
-Returns the resolved file paths for the generated documents.
+## Input and Repository Preparation
 
-## Core Types
+### `resolveRepositorySource(input, cacheRoot?)`
+
+Accepts either a GitHub URL or a local path and returns a normalized `RepositorySource`.
+
+### `normalizeGithubUrl(rawUrl, cacheRoot?)`
+
+Validates a GitHub repository URL and returns its normalized clone metadata.
+
+### `prepareRepository(rawUrl, options?)`
+
+Clones or refreshes a cached GitHub repository and returns a ready-to-analyze local checkout.
+
+### `syncRepositoryToCache(options)`
+
+Low-level Git sync step used by `prepareRepository`.
+
+## Analysis Functions
+
+### `scanRepository(rootPath, repoName?)`
+
+Discovers files, directories, manifests, source files, and language distribution.
+
+### `detectDependencies(snapshot)`
+
+Parses supported manifests and emits normalized dependency information.
+
+### `buildProjectInsights(snapshot, dependencies, entrypoints)`
+
+Detects:
+
+- package manager
+- scripts
+- frameworks
+- build/test/lint tooling
+- config files
+- environment files
+- notable patterns
+
+### `extractSymbolInsights(snapshot)`
+
+Extracts exported symbols, HTTP endpoints, import relationships, and export counts from TypeScript, JavaScript, Python, Go, and Rust source files.
+
+### `detectEntrypoints(snapshot, packageManifest, endpoints)`
+
+Finds likely application or library entry points.
+
+### `analyzeArchitecture(snapshot, dependencies, entrypoints, symbols, endpoints, projectInsights, localImportGraph, fileExportCounts)`
+
+Produces module summaries, project kind, and data-flow notes.
+
+## Generation Functions
+
+### `generateReadme(analysis)`
+
+Builds an onboarding-oriented README using grounded repository facts.
+
+### `generateArchitectureDoc(analysis)`
+
+Builds a system-oriented architecture document focused on structure and flow.
+
+### `generateApiDoc(analysis)`
+
+Builds an API-oriented document from detected routes and exported symbols.
+
+### `writeDocs(docs, outputDir)`
+
+Writes the generated markdown files to the resolved destination.
+
+## Important Types
 
 ### `RepositorySource`
 
-Normalized metadata for the requested repository, including cache location and canonical clone URL.
+Normalized description of the analysis target.
 
 ### `RepositorySnapshot`
 
-The static view of the scanned repository:
+Low-level repository scan results.
 
-- entries
-- source files
-- language distribution
-- manifest data
-- tree lines
-- warnings
+### `ProjectInsights`
+
+Higher-level tooling and configuration signals.
 
 ### `AnalysisResult`
 
-The central analysis object used by the generator layer. It includes:
-
-- dependencies
-- entry points
-- modules
-- symbols
-- endpoints
-- architecture summary
-- repository overview
+The final structured analysis used to generate markdown.
 
 ### `GeneratedDocs`
 
-Final markdown strings for the generated documentation files.
-
-### `WriteResult`
-
-Resolved output directory and generated file paths.
-
+The rendered markdown output strings.

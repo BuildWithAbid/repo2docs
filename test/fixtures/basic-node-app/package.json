@@ -2,20 +2,26 @@
   "name": "basic-node-app",
   "version": "0.1.0",
   "description": "Reference Express service used to validate repo2docs.",
+  "packageManager": "pnpm@9.0.0",
   "main": "dist/index.js",
   "bin": {
     "basic-node-app": "src/index.ts"
   },
   "scripts": {
     "dev": "node src/index.ts",
+    "build": "tsup src/index.ts --format cjs",
     "start": "node src/index.ts",
-    "test": "node --test"
+    "test": "vitest run",
+    "lint": "eslint ."
   },
   "dependencies": {
     "express": "^5.0.0"
   },
   "devDependencies": {
-    "typescript": "^5.0.0"
+    "eslint": "^9.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^2.0.0"
   }
 }
 

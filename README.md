@@ -1,123 +1,147 @@
-# repo2docs: Generate Documentation from a GitHub Repository
+# repo2docs
 
-`repo2docs` is a TypeScript CLI that clones a GitHub repository, analyzes its structure with deterministic heuristics, and generates production-ready project documentation without calling external AI services.
+`repo2docs` is a TypeScript CLI that analyzes a GitHub repository or local project directory and generates three developer-facing documents:
 
-The tool is designed for engineers who need a fast way to create a high-quality `README.md`, `ARCHITECTURE.md`, and `API.md` from an existing codebase.
+- `README.md`
+- `ARCHITECTURE.md`
+- `API.md`
 
-## Why repo2docs
+Version 2 focuses on output quality, code-aware heuristics, local-path support, and safer default behavior.
 
-Maintaining technical documentation is usually delayed because it is repetitive and expensive. `repo2docs` reduces that work by converting repository structure, manifests, exports, entry points, and HTTP routes into clear markdown files that teams can review and refine.
+## What v2 Improves
 
-## Key Features
+- Supports both GitHub repository URLs and local paths.
+- Writes generated docs into a dedicated folder by default: `repo2docs-output/<repo>/`.
+- Produces less generic documentation by grounding output in detected entry points, scripts, modules, routes, frameworks, tooling, and config files.
+- Detects package managers, build tools, test setup, linting, CI signals, environment files, and notable repository patterns.
+- Improves CLI help text, terminal output, and error messages.
+- Expands automated tests around analysis, repository syncing, and input resolution.
 
-- Clone or refresh a GitHub repository into a local cache.
-- Parse repository structure, source files, and common manifests.
-- Detect entry points from package metadata and conventional filenames.
-- Extract exported functions, classes, interfaces, and HTTP endpoints from TypeScript and JavaScript projects.
-- Generate three documentation files: `README.md`, `ARCHITECTURE.md`, and `API.md`.
-- Produce deterministic output with no paid APIs and no external AI dependency.
-
-## How It Works
-
-`repo2docs` runs a straightforward pipeline:
-
-1. Validate the GitHub repository URL.
-2. Clone or refresh the repository in a local cache directory.
-3. Scan files, directories, manifests, and language distribution.
-4. Detect entry points, modules, exported symbols, and route handlers.
-5. Generate markdown documentation and write it to the current working directory.
-
-## Installation
-
-### Local development
+## Install
 
 ```bash
 npm install
 npm run build
 ```
 
-### Run locally
+## Usage
+
+### Analyze a GitHub repository
 
 ```bash
-node dist/src/cli.js https://github.com/owner/repository
+repo2docs https://github.com/owner/repository
 ```
 
-## CLI Usage
+### Analyze a local repository
 
 ```bash
-repo2docs <github_repo_url>
+repo2docs .
 ```
 
-### Example
+### Write output to a custom folder
 
 ```bash
-repo2docs https://github.com/octocat/Hello-World
+repo2docs ../my-service --output ./docs-output/my-service
 ```
 
-The command writes the following files into the current working directory:
+### Show CLI help
 
-- `README.md`
-- `ARCHITECTURE.md`
-- `API.md`
+```bash
+repo2docs --help
+```
 
-## Generated Documentation
+## Default Output
 
-### README.md
+If `--output` is not provided, `repo2docs` writes generated documents to:
 
-Generates a project overview, setup guidance, usage hints, a technology snapshot, and a repository structure summary.
+```text
+repo2docs-output/<repo-name>/
+```
 
-### ARCHITECTURE.md
+Example:
 
-Explains system design, entry points, main modules, dependency signals, and inferred data flow.
+```text
+repo2docs-output/my-service/README.md
+repo2docs-output/my-service/ARCHITECTURE.md
+repo2docs-output/my-service/API.md
+```
 
-### API.md
+## What the Tool Detects
 
-Documents exported symbols and detected HTTP endpoints, grouped by source module.
+### Repository structure
 
-## Supported Analysis Heuristics
+- source files and directory layout
+- likely entry points
+- important modules
+- language distribution
 
-### Repository discovery
+### Tooling and runtime signals
 
-- Directory tree traversal
-- Source file detection
-- Language distribution by file extension
-- Common ignore rules for build artifacts and vendored folders
+- package manager
+- build tools
+- test setup
+- lint and formatting tools
+- CI workflow files
+- environment and deployment files
 
-### Manifest parsing
+### Code surface
 
-- `package.json`
-- `tsconfig.json`
-- `requirements.txt`
-- `pyproject.toml`
-- `go.mod`
-- `Cargo.toml`
+- exported functions
+- exported classes
+- exported interfaces and types
+- HTTP endpoints across common JS, Python, Go, and Rust server patterns
+- re-exported public module surfaces
+- local import relationships used for module summaries
 
-### Code analysis
+## Generated Documents
 
-- Exported TypeScript and JavaScript functions
-- Exported classes, interfaces, and types
-- CLI entry points from `bin`, `main`, `module`, and `exports`
-- Conventional entry points such as `src/index.ts`, `src/main.ts`, and server bootstrap files
-- Express-style route detection for common HTTP methods
+### `README.md`
+
+Focused on onboarding:
+
+- project overview
+- quick facts
+- getting started steps
+- detected scripts
+- entry points
+- important modules
+- dependencies
+- configuration surface
+
+### `ARCHITECTURE.md`
+
+Focused on system understanding:
+
+- system shape
+- entry points
+- module map
+- data flow
+- tooling and config surface
+- notable patterns
+
+### `API.md`
+
+Focused on public code surface:
+
+- primary entry points
+- HTTP endpoints
+- exported symbols grouped by module
 
 ## Project Structure
 
 ```text
-repo2docs/
-├── src/
-│   ├── analyze/
-│   ├── core/
-│   ├── generate/
-│   ├── git/
-│   ├── output/
-│   └── utils/
-├── test/
-│   ├── fixtures/
-│   ├── integration/
-│   └── unit/
-├── package.json
-├── tsconfig.json
-└── README.md
+src/
+  analyze/   Repository scanning, heuristics, and architecture inference
+  core/      Shared types and operational errors
+  generate/  Markdown document renderers
+  git/       GitHub clone and fetch support
+  input/     Input resolution for GitHub URLs and local paths
+  output/    Output writing
+  utils/     Shared helpers
+test/
+  fixtures/     Sample repositories used by tests
+  integration/  End-to-end behavior tests
+  unit/         Focused logic tests
 ```
 
 ## Development
@@ -127,19 +151,12 @@ npm run build
 npm test
 ```
 
-## Limitations
+## Constraints and Philosophy
 
-- Version 1 is strongest on TypeScript and JavaScript repositories.
-- Analysis is heuristic and intentionally conservative.
-- Private GitHub repositories are not handled automatically by the current CLI workflow.
-- The generated output should be reviewed before publishing in customer-facing environments.
-
-## Roadmap
-
-- Better support for Python, Go, and Rust symbol extraction
-- Monorepo-aware package summaries
-- Configurable output paths and formatting profiles
-- Optional repository-level templates for custom documentation style
+- deterministic heuristics over AI calls
+- minimal dependencies
+- practical output over speculative documentation
+- simple architecture that is easy to extend
 
 ## License
 

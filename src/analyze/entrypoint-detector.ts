@@ -124,6 +124,14 @@ export function detectEntrypoints(
       "Declared in package.json module field",
       "high"
     );
+    addEntrypoint(
+      entrypoints,
+      seenKeys,
+      resolveSourcePath(packageManifest.types ?? "", fileSet),
+      "package-types",
+      "Declared in package.json types field",
+      "medium"
+    );
 
     for (const exportTarget of packageManifest.exports) {
       addEntrypoint(
@@ -175,4 +183,3 @@ export function detectEntrypoints(
     return left.relativePath.localeCompare(right.relativePath);
   });
 }
-

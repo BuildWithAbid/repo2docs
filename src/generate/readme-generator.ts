@@ -1,8 +1,24 @@
-import type { AnalysisResult } from "../core/types";
+import type { AnalysisResult, DependencyInfo, ScriptInfo } from "../core/types";
 import { formatList, renderCodeBlock } from "../utils/text";
 
+function appendSection(sections: string[], title: string, body: string[]): void {
+  if (body.length === 0) {
+    return;
+  }
+
+  sections.push("", `## ${title}`, "", ...body);
+}
+
+function describeApplicationStack(analysis: AnalysisResult): string {
+  const frameworkNames = analysis.projectInsights.frameworks
+    .filter((framework) => framework.category === "frontend" || framework.category === "backend" || framework.category === "fullstack" || framework.category === "runtime")
+    .map((framework) => framework.name);
+
+  return frameworkNames.length > 0 ? frameworkNames.join(", ") : "None confidently detected";
+}
+
 function renderTree(analysis: AnalysisResult): string {
-  const treeLines = analysis.snapshot.treeLines.slice(0, 120);
+  const treeLines = analysis.snapshot.treeLines.slice(0, 80);
   if (analysis.snapshot.treeLines.length > treeLines.length) {
     treeLines.push(`... (${analysis.snapshot.treeLines.length - treeLines.length} more entries omitted)`);
   }
@@ -10,92 +26,159 @@ function renderTree(analysis: AnalysisResult): string {
   return renderCodeBlock("text", [analysis.snapshot.repoName, ...treeLines]);
 }
 
-function inferSetupSteps(analysis: AnalysisResult): string[] {
-  const packageManifest = analysis.snapshot.manifests.packageJson;
-  if (packageManifest) {
-    const commands = ["Install dependencies with `npm install`."];
-    if (packageManifest.scripts.build) {
-      commands.push("Build the project with `npm run build`.");
-    }
-    if (packageManifest.scripts.test) {
-      commands.push("Run the test suite with `npm test` or the repository's configured test command.");
-    }
-    return commands;
+function getInstallCommand(packageManager: string | undefined): string {
+  switch (packageManager) {
+    case "pnpm":
+      return "pnpm install";
+    case "yarn":
+      return "yarn install";
+    case "bun":
+      return "bun install";
+    default:
+      return "npm install";
   }
-
-  if (analysis.snapshot.manifests.requirementsTxt) {
-    return [
-      "Create a virtual environment if needed.",
-      "Install dependencies with `pip install -r requirements.txt`."
-    ];
-  }
-
-  return ["Review the repository manifests to install dependencies before running the project."];
 }
 
-function inferUsage(analysis: AnalysisResult): string[] {
-  const packageManifest = analysis.snapshot.manifests.packageJson;
-  const usageNotes: string[] = [];
+function getRunScriptCommand(packageManager: string | undefined, scriptName: string): string {
+  switch (packageManager) {
+    case "yarn":
+      return `yarn ${scriptName}`;
+    case "pnpm":
+      return `pnpm ${scriptName}`;
+    case "bun":
+      return `bun run ${scriptName}`;
+    default:
+      return `npm run ${scriptName}`;
+  }
+}
 
-  for (const entrypoint of analysis.entrypoints.slice(0, 3)) {
-    usageNotes.push(`Primary entrypoint: \`${entrypoint.relativePath}\` (${entrypoint.evidence}).`);
+function selectInterestingScripts(scripts: ScriptInfo[]): ScriptInfo[] {
+  const preferredOrder: ScriptInfo["category"][] = ["dev", "start", "build", "test", "lint", "format", "release", "other"];
+  return [...scripts]
+    .sort((left, right) => preferredOrder.indexOf(left.category) - preferredOrder.indexOf(right.category) || left.name.localeCompare(right.name))
+    .slice(0, 8);
+}
+
+function buildGettingStarted(analysis: AnalysisResult): string[] {
+  const steps: string[] = [];
+  const packageManager = analysis.projectInsights.packageManager;
+
+  if (analysis.snapshot.manifests.packageJson) {
+    steps.push(`Install dependencies with \`${getInstallCommand(packageManager)}\`.`);
+  } else if (analysis.snapshot.manifests.requirementsTxt) {
+    steps.push("Install dependencies with `pip install -r requirements.txt`.");
   }
 
-  if (packageManifest?.scripts.start) {
-    usageNotes.push("Start the application with the repository's `npm start` script.");
-  } else if (packageManifest?.scripts.dev) {
-    usageNotes.push("Use the `npm run dev` script for local development.");
+  if (analysis.projectInsights.environmentFiles.length > 0) {
+    steps.push(`Review environment files before running the project: ${analysis.projectInsights.environmentFiles.map((item) => `\`${item}\``).join(", ")}.`);
   }
 
-  if (analysis.endpoints.length > 0) {
-    const sampleEndpoints = analysis.endpoints.slice(0, 5).map((endpoint) => `${endpoint.method} ${endpoint.routePath}`);
-    usageNotes.push(`Detected HTTP surface: ${sampleEndpoints.join(", ")}.`);
+  const devScript = analysis.projectInsights.scripts.find((script) => script.category === "dev");
+  const startScript = analysis.projectInsights.scripts.find((script) => script.category === "start");
+  const testScript = analysis.projectInsights.scripts.find((script) => script.category === "test");
+
+  if (devScript) {
+    steps.push(`Start the local development workflow with \`${getRunScriptCommand(packageManager, devScript.name)}\`.`);
+  } else if (startScript) {
+    steps.push(`Run the application with \`${getRunScriptCommand(packageManager, startScript.name)}\`.`);
+  } else if (analysis.entrypoints[0]) {
+    steps.push(`Start from the detected entrypoint \`${analysis.entrypoints[0].relativePath}\`.`);
   }
 
-  return usageNotes.length > 0
-    ? usageNotes
-    : ["Inspect the detected entrypoints to determine how the project is started or consumed."];
+  if (testScript) {
+    steps.push(`Run the test suite with \`${getRunScriptCommand(packageManager, testScript.name)}\`.`);
+  }
+
+  return steps;
+}
+
+function groupDependencies(dependencies: DependencyInfo[]): string[] {
+  return dependencies
+    .filter((dependency) => dependency.group === "runtime" || dependency.group === "development")
+    .slice(0, 12)
+    .map((dependency) => `${dependency.name}${dependency.version ? ` (${dependency.version})` : ""}${dependency.group ? ` - ${dependency.group}` : ""}`);
 }
 
 export function generateReadme(analysis: AnalysisResult): string {
   const packageManifest = analysis.snapshot.manifests.packageJson;
   const title = packageManifest?.name ?? analysis.snapshot.repoName;
   const primaryLanguage = Object.entries(analysis.snapshot.languageStats).sort((left, right) => right[1] - left[1])[0]?.[0] ?? "Unknown";
-  const setupSteps = inferSetupSteps(analysis);
-  const usageSteps = inferUsage(analysis);
-  const moduleSummary = analysis.modules.slice(0, 6).map((moduleInfo) => `${moduleInfo.path}: ${moduleInfo.summary}`);
+  const quickFacts = [
+    `Project type: ${analysis.architecture.projectKind}`,
+    `Primary language: ${primaryLanguage}`,
+    `Package manager: ${analysis.projectInsights.packageManager ?? "Not confidently detected"}`,
+    `Frameworks and major libraries: ${describeApplicationStack(analysis)}`,
+    `Entry points detected: ${analysis.entrypoints.length}`,
+    `Source files scanned: ${analysis.snapshot.sourceFiles.length}`
+  ];
 
-  return [
+  const sections: string[] = [
     `# ${title}`,
     "",
-    "## Overview",
-    "",
-    packageManifest?.description ?? analysis.overview,
-    "",
-    "## Technology Snapshot",
-    "",
-    formatList([
-      `Project type: ${analysis.architecture.projectKind}`,
-      `Primary language: ${primaryLanguage}`,
-      `Source files scanned: ${analysis.snapshot.sourceFiles.length}`,
-      `Dependencies detected: ${analysis.dependencies.length}`
-    ]),
-    "",
-    "## Project Structure",
-    "",
-    renderTree(analysis),
-    "",
-    "## Setup",
-    "",
-    formatList(setupSteps),
-    "",
-    "## Usage",
-    "",
-    formatList(usageSteps),
-    "",
-    "## Key Modules",
-    "",
-    formatList(moduleSummary.length > 0 ? moduleSummary : ["No strong module boundaries were detected."])
-  ].join("\n");
-}
+    packageManifest?.description ?? analysis.overview
+  ];
 
+  appendSection(sections, "Overview", [
+    analysis.overview,
+    ...(analysis.projectInsights.notablePatterns.length > 0 ? ["", ...formatList(analysis.projectInsights.notablePatterns).split("\n")] : [])
+  ]);
+
+  appendSection(sections, "Quick Facts", formatList(quickFacts).split("\n"));
+
+  appendSection(
+    sections,
+    "Getting Started",
+    formatList(buildGettingStarted(analysis).length > 0 ? buildGettingStarted(analysis) : ["Inspect the detected entrypoints and scripts before running the project."]).split("\n")
+  );
+
+  if (analysis.projectInsights.scripts.length > 0) {
+    appendSection(
+      sections,
+      "Scripts",
+      formatList(selectInterestingScripts(analysis.projectInsights.scripts).map((script) => `\`${script.name}\`: \`${script.command}\``)).split("\n")
+    );
+  }
+
+  if (analysis.entrypoints.length > 0) {
+    appendSection(
+      sections,
+      "Entrypoints",
+      formatList(analysis.entrypoints.map((entrypoint) => `\`${entrypoint.relativePath}\` [${entrypoint.confidence}] ${entrypoint.evidence}`)).split("\n")
+    );
+  }
+
+  if (analysis.modules.length > 0) {
+    appendSection(
+      sections,
+      "Important Modules",
+      formatList(
+        analysis.modules.slice(0, 8).map((moduleInfo) => `\`${moduleInfo.path}\` (${moduleInfo.role}) - ${moduleInfo.summary}`)
+      ).split("\n")
+    );
+  }
+
+  const dependencyLines = groupDependencies(analysis.dependencies);
+  if (dependencyLines.length > 0) {
+    appendSection(sections, "Dependencies", formatList(dependencyLines).split("\n"));
+  }
+
+  if (analysis.projectInsights.configFiles.length > 0 || analysis.projectInsights.environmentFiles.length > 0) {
+    appendSection(
+      sections,
+      "Configuration",
+      formatList(
+        analysis.projectInsights.configFiles
+          .slice(0, 10)
+          .map((configFile) => `\`${configFile.path}\` - ${configFile.description}`)
+      ).split("\n")
+    );
+  }
+
+  appendSection(sections, "Repository Structure", [renderTree(analysis)]);
+
+  if (analysis.warnings.length > 0) {
+    appendSection(sections, "Analysis Notes", formatList(analysis.warnings.slice(0, 10)).split("\n"));
+  }
+
+  return sections.join("\n");
+}

@@ -98,8 +98,8 @@ function buildTreeLines(entries: SnapshotEntry[]): string[] {
     const children = [...node.children.entries()].sort(([left], [right]) => left.localeCompare(right));
     return children.flatMap(([name, child], index) => {
       const isLast = index === children.length - 1;
-      const connector = isLast ? "└── " : "├── ";
-      const nextPrefix = `${prefix}${isLast ? "    " : "│   "}`;
+      const connector = isLast ? "\\-- " : "|-- ";
+      const nextPrefix = `${prefix}${isLast ? "    " : "|   "}`;
       return [`${prefix}${connector}${name}`, ...renderNode(child, nextPrefix)];
     });
   };
@@ -190,4 +190,3 @@ export async function scanRepository(rootPath: string, repoName = path.basename(
     warnings
   };
 }
-

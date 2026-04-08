@@ -7,8 +7,25 @@ interface DependencyDetectionResult {
   manifests: ManifestSet;
 }
 
+function normalizePackageSpec(spec: string): { name: string; version?: string } {
+  const requirementMatch = spec.match(/^([A-Za-z0-9_.@/\-]+)\s*(==|>=|<=|~=|=|\^|~)?\s*(.+)?$/);
+  if (!requirementMatch) {
+    return { name: spec.trim() };
+  }
+
+  const name = requirementMatch[1].trim();
+  const version = requirementMatch[3]?.trim();
+  return {
+    name,
+    version: version && version.length > 0 ? version : undefined
+  };
+}
+
 function ensureArray(value: unknown): string[] {
   if (!Array.isArray(value)) {
+    if (value && typeof value === "object" && "packages" in value && Array.isArray((value as { packages?: unknown }).packages)) {
+      return (value as { packages: unknown[] }).packages.filter((item): item is string => typeof item === "string");
+    }
     return [];
   }
 
@@ -61,6 +78,7 @@ function parsePackageManifest(raw: Record<string, unknown>): PackageManifestInfo
     devDependencies: isStringMap(raw.devDependencies) ? raw.devDependencies : {},
     peerDependencies: isStringMap(raw.peerDependencies) ? raw.peerDependencies : {},
     packageManager: typeof raw.packageManager === "string" ? raw.packageManager : undefined,
+    engines: isStringMap(raw.engines) ? raw.engines : {},
     main: typeof raw.main === "string" ? raw.main : undefined,
     module: typeof raw.module === "string" ? raw.module : undefined,
     types: typeof raw.types === "string" ? raw.types : undefined,
@@ -203,9 +221,11 @@ export async function detectDependencies(snapshot: RepositorySnapshot): Promise<
   if (requirementsContents) {
     manifests.requirementsTxt = parseRequirementsFile(requirementsContents);
     for (const requirement of manifests.requirementsTxt) {
+      const normalized = normalizePackageSpec(requirement);
       dependencies.push({
         ecosystem: "python",
-        name: requirement,
+        name: normalized.name,
+        version: normalized.version,
         sourceFile: "requirements.txt"
       });
     }
@@ -215,9 +235,11 @@ export async function detectDependencies(snapshot: RepositorySnapshot): Promise<
   if (pyprojectContents) {
     manifests.pyprojectDependencies = parsePyprojectDependencies(pyprojectContents);
     for (const dependency of manifests.pyprojectDependencies) {
+      const normalized = normalizePackageSpec(dependency);
       dependencies.push({
         ecosystem: "python",
-        name: dependency,
+        name: normalized.name,
+        version: normalized.version,
         sourceFile: "pyproject.toml"
       });
     }
@@ -227,9 +249,11 @@ export async function detectDependencies(snapshot: RepositorySnapshot): Promise<
   if (goModContents) {
     manifests.goDependencies = parseGoModDependencies(goModContents);
     for (const dependency of manifests.goDependencies) {
+      const [name, version] = dependency.split(/\s+/);
       dependencies.push({
         ecosystem: "go",
-        name: dependency,
+        name,
+        version,
         sourceFile: "go.mod"
       });
     }
@@ -239,9 +263,11 @@ export async function detectDependencies(snapshot: RepositorySnapshot): Promise<
   if (cargoContents) {
     manifests.cargoDependencies = parseCargoDependencies(cargoContents);
     for (const dependency of manifests.cargoDependencies) {
+      const [name, value] = dependency.split("=", 2);
       dependencies.push({
         ecosystem: "rust",
-        name: dependency,
+        name: name.trim(),
+        version: value?.trim(),
         sourceFile: "Cargo.toml"
       });
     }
@@ -252,4 +278,3 @@ export async function detectDependencies(snapshot: RepositorySnapshot): Promise<
     manifests
   };
 }
-
