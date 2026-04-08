@@ -1,0 +1,21 @@
+{
+  "name": "basic-node-app",
+  "version": "0.1.0",
+  "description": "Reference Express service used to validate repo2docs.",
+  "main": "dist/index.js",
+  "bin": {
+    "basic-node-app": "src/index.ts"
+  },
+  "scripts": {
+    "dev": "node src/index.ts",
+    "start": "node src/index.ts",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "express": "^5.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}
+

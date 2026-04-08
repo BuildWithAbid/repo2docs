@@ -1,0 +1,51 @@
+{
+  "name": "repo2docs",
+  "version": "1.0.0",
+  "description": "Generate deterministic README, architecture, and API documentation from a GitHub repository.",
+  "main": "dist/src/index.js",
+  "author": "buildwithabid",
+  "homepage": "https://github.com/buildwithabid/repo2docs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/buildwithabid/repo2docs.git"
+  },
+  "bugs": {
+    "url": "https://github.com/buildwithabid/repo2docs/issues"
+  },
+  "bin": {
+    "repo2docs": "dist/src/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "ARCHITECTURE.md",
+    "API.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true });\"",
+    "start": "node dist/src/cli.js",
+    "test": "npm run build --silent && node --test \"dist/test/**/*.test.js\""
+  },
+  "keywords": [
+    "cli",
+    "documentation",
+    "github",
+    "typescript",
+    "readme-generator",
+    "architecture-documentation",
+    "api-documentation",
+    "codebase-analysis"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "typescript": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0"
+  }
+}
